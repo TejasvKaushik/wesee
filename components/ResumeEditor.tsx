@@ -22,6 +22,8 @@ import {
 } from "@dnd-kit/sortable";
 
 import { CSS } from "@dnd-kit/utilities";
+import { parseLatexFile } from "@/lib/latex-parser";
+import { parsePdfToChunks } from "@/lib/pdf-parser";
 import { useSortable } from "@dnd-kit/sortable";
 
 interface ResumeChunk {
@@ -177,7 +179,8 @@ export default function ResumeBuilder() {
   ]);
 
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [preamble] = useState(`\\documentclass[11pt,a4paper]{article}
+  const [preamble, setPreamble] =
+    useState(`\\documentclass[11pt,a4paper]{article}
 \\usepackage[utf8]{inputenc}
 \\usepackage{geometry}
 \\geometry{margin=1in}
@@ -269,11 +272,70 @@ john.doe@email.com | (555) 123-4567 | github.com/johndoe
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const content = await file.text();
-    // In real implementation, parse the LaTeX file here
-    alert(
-      "LaTeX file uploaded! In production, this would parse the file and populate chunks."
-    );
+    try {
+      const fileExtension = file.name.split(".").pop()?.toLowerCase();
+
+      if (fileExtension === "pdf") {
+        // Handle PDF upload
+        const { chunks: parsedChunks, preamble: defaultPreamble } =
+          await parsePdfToChunks(file);
+
+        // Update preamble
+        setPreamble(defaultPreamble);
+
+        // Update chunks - all chunks start as active
+        const allChunks = parsedChunks.map((chunk, idx) => ({
+          id: chunk.id,
+          type: chunk.type as "section" | "item",
+          title: chunk.title,
+          content: chunk.content,
+          rawLatex: chunk.rawLatex,
+          order: idx,
+          isActive: true,
+          parentId: chunk.parentId,
+        }));
+
+        setChunks(allChunks);
+
+        alert(
+          `Successfully loaded ${allChunks.length} sections from PDF: ${file.name}!\n\nNote: PDF import is experimental. Please review and edit the sections as needed.`
+        );
+      } else if (fileExtension === "tex") {
+        // Handle LaTeX upload
+        const content = await file.text();
+        const parsedData = parseLatexFile(content);
+
+        // Update preamble
+        setPreamble(parsedData.preamble);
+
+        // Update chunks - all chunks start as active
+        const allChunks = parsedData.activeChunks.map((chunk) => ({
+          id: chunk.id,
+          type: chunk.type as "section" | "item",
+          title: chunk.title,
+          content: chunk.content,
+          rawLatex: chunk.rawLatex,
+          order: chunk.order,
+          isActive: true,
+          parentId: chunk.parentId,
+        }));
+
+        setChunks(allChunks);
+
+        alert(
+          `Successfully loaded ${allChunks.length} sections from ${file.name}!`
+        );
+      } else {
+        alert("Unsupported file format. Please upload a .tex or .pdf file.");
+      }
+    } catch (error) {
+      console.error("Error parsing file:", error);
+      alert(
+        `Error parsing file. Please make sure it's a valid ${
+          file.name.endsWith(".pdf") ? "PDF" : "LaTeX"
+        } file.`
+      );
+    }
   };
 
   return (
@@ -286,10 +348,10 @@ john.doe@email.com | (555) 123-4567 | github.com/johndoe
             <div className="flex gap-2">
               <label className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer flex items-center gap-2">
                 <Upload className="w-4 h-4" />
-                Upload .tex
+                Upload Resume
                 <input
                   type="file"
-                  accept=".tex"
+                  accept=".tex,.pdf"
                   onChange={handleFileUpload}
                   className="hidden"
                 />
